@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: backend-staging
+
+namespace: staging
+
+bases:
+  - ../../base
+
+images:
+  - name: ghcr.io/your-org/backend
+    newName: ghcr.io/your-org/backend
+    newTag: "latest"
+
+replicas:
+  - name: backend
+    count: 2
+
+commonLabels:
+  environment: staging
+
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - NODE_ENV=staging
+      - LOG_LEVEL=info
+      - DB_HOST=postgres-service.staging.svc.cluster.local
+      - REDIS_URL=redis://redis-service.staging.svc.cluster.local:6379
+      - CORS_ORIGIN=https://staging.example.com
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "100m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "256Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "512Mi"
+    target:
+      kind: Deployment
+      name: backend

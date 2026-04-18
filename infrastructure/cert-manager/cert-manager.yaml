@@ -1,0 +1,140 @@
+---
+# ============================================================
+# Sealed Secrets Controller — Install via ArgoCD Helm App
+# Sealed Secrets lets you safely commit encrypted secrets to Git
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sealed-secrets
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # Install very first
+spec:
+  project: gitops-demo
+  source:
+    repoURL: https://bitnami-labs.github.io/sealed-secrets
+    chart: sealed-secrets
+    targetRevision: "2.15.0"
+    helm:
+      releaseName: sealed-secrets
+      values: |
+        fullnameOverride: sealed-secrets-controller
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+---
+# ============================================================
+# Example: SealedSecret (safe to commit to Git)
+# Generated with: kubeseal --format yaml < secret.yaml > sealed-secret.yaml
+# ============================================================
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: postgres-secret
+  namespace: production
+  labels:
+    app: postgres
+    app.kubernetes.io/managed-by: argocd
+spec:
+  encryptedData:
+    # These values are encrypted and safe to store in Git
+    # Decrypt only works with the private key on your cluster
+    POSTGRES_USER: AgBnK2...  # Replace with actual kubeseal output
+    POSTGRES_PASSWORD: AgCDv4...  # Replace with actual kubeseal output
+    DATA_SOURCE_NAME: AgEf3a...  # Replace with actual kubeseal output
+  template:
+    metadata:
+      name: postgres-secret
+      namespace: production
+    type: Opaque
+
+---
+# ============================================================
+# cert-manager — ClusterIssuers (Let's Encrypt)
+# ============================================================
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  labels:
+    app.kubernetes.io/managed-by: argocd
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: devops@your-org.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-key
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    app.kubernetes.io/managed-by: argocd
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: devops@your-org.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+    # HTTP-01 challenge for standard ingress
+    - http01:
+        ingress:
+          class: nginx
+    # DNS-01 challenge for wildcard certs (requires cloud provider credentials)
+    # Uncomment and configure for wildcard TLS:
+    # - dns01:
+    #     cloudflare:
+    #       email: devops@your-org.com
+    #       apiTokenSecretRef:
+    #         name: cloudflare-api-token
+    #         key: api-token
+    #   selector:
+    #     dnsZones:
+    #       - "example.com"
+
+---
+# ============================================================
+# cert-manager — Application Certificate (manual)
+# Usually managed automatically via Ingress annotation
+# ============================================================
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: backend-cert
+  namespace: production
+  labels:
+    app: backend
+    app.kubernetes.io/managed-by: argocd
+spec:
+  secretName: backend-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: api.example.com
+  dnsNames:
+    - api.example.com
+  duration: 2160h     # 90 days
+  renewBefore: 360h   # Renew 15 days before expiry
+  privateKey:
+    algorithm: ECDSA
+    size: 256

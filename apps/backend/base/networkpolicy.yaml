@@ -1,0 +1,13 @@
+---
+# Deny all by default — then allow only what's needed
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  labels:
+    app.kubernetes.io/managed-by: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress

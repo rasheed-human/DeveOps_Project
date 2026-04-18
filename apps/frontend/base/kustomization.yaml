@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: frontend-base
+
+resources:
+  - deployment.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: gitops-demo
+  app.kubernetes.io/managed-by: argocd
+
+images:
+  - name: ghcr.io/your-org/frontend
+    newName: ghcr.io/your-org/frontend
+    newTag: latest

@@ -1,0 +1,250 @@
+---
+# ============================================================
+# PrometheusRule — Application Alerting Rules
+# ============================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gitops-demo-alerts
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: kube-prometheus-stack
+    app.kubernetes.io/managed-by: argocd
+spec:
+  groups:
+  # ---- Application Availability ----
+  - name: application.availability
+    interval: 30s
+    rules:
+    - alert: PodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace=~"dev|staging|production"}[5m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "Pod {{ $labels.pod }} is crash looping"
+        description: "Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) is restarting at {{ $value }} times/min."
+        runbook: "https://wiki.example.com/runbooks/pod-crash-looping"
+
+    - alert: PodNotReady
+      expr: |
+        kube_pod_status_ready{condition="true", namespace=~"dev|staging|production"} == 0
+      for: 10m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "Pod {{ $labels.pod }} is not ready"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 10 minutes."
+
+    - alert: DeploymentReplicasMismatch
+      expr: |
+        kube_deployment_spec_replicas{namespace=~"production"}
+          != kube_deployment_status_replicas_available{namespace=~"production"}
+      for: 5m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "Deployment {{ $labels.deployment }} has mismatched replicas"
+        description: "Deployment {{ $labels.deployment }} in {{ $labels.namespace }} has {{ $value }} available replicas, expected {{ $labels.replicas }}."
+
+  # ---- Application Performance ----
+  - name: application.performance
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        sum(rate(http_requests_total{status=~"5..", namespace=~"production"}[5m]))
+          /
+        sum(rate(http_requests_total{namespace=~"production"}[5m])) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+        team: backend
+      annotations:
+        summary: "High error rate in production"
+        description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+        runbook: "https://wiki.example.com/runbooks/high-error-rate"
+
+    - alert: HighLatency
+      expr: |
+        histogram_quantile(0.99,
+          sum(rate(http_request_duration_seconds_bucket{namespace="production"}[5m]))
+          by (le, service)
+        ) > 2
+      for: 5m
+      labels:
+        severity: warning
+        team: backend
+      annotations:
+        summary: "High p99 latency on {{ $labels.service }}"
+        description: "p99 latency is {{ $value }}s for service {{ $labels.service }} (threshold: 2s)"
+
+    - alert: LowRequestRate
+      expr: |
+        sum(rate(http_requests_total{namespace="production"}[5m])) < 0.1
+      for: 15m
+      labels:
+        severity: warning
+        team: backend
+      annotations:
+        summary: "Suspiciously low request rate in production"
+        description: "Request rate dropped to {{ $value }} req/s. Possible traffic issue or outage."
+
+  # ---- Resource Usage ----
+  - name: resource.usage
+    interval: 60s
+    rules:
+    - alert: HighCPUUsage
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{namespace=~"production", container!=""}[5m]))
+          by (pod, namespace)
+          /
+        sum(kube_pod_container_resource_limits{resource="cpu", namespace=~"production"})
+          by (pod, namespace) > 0.85
+      for: 10m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "High CPU usage on pod {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its CPU limit."
+
+    - alert: HighMemoryUsage
+      expr: |
+        sum(container_memory_working_set_bytes{namespace=~"production", container!=""})
+          by (pod, namespace)
+          /
+        sum(kube_pod_container_resource_limits{resource="memory", namespace=~"production"})
+          by (pod, namespace) > 0.90
+      for: 5m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "High memory usage on pod {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit. OOM kill imminent."
+
+    - alert: PVCAlmostFull
+      expr: |
+        (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "PVC {{ $labels.persistentvolumeclaim }} is almost full"
+        description: "PVC is {{ $value | humanizePercentage }} full in namespace {{ $labels.namespace }}."
+
+  # ---- Database ----
+  - name: database.health
+    interval: 60s
+    rules:
+    - alert: PostgreSQLDown
+      expr: |
+        pg_up{namespace=~"production"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "PostgreSQL is DOWN"
+        description: "PostgreSQL instance in {{ $labels.namespace }} is not responding."
+
+    - alert: PostgreSQLHighConnections
+      expr: |
+        sum(pg_stat_activity_count) by (instance) > 180
+      for: 5m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "PostgreSQL connection count is high"
+        description: "{{ $value }} active connections (limit: 200)"
+
+  # ---- GitOps / ArgoCD ----
+  - name: gitops.sync
+    interval: 60s
+    rules:
+    - alert: ArgoCDSyncFailed
+      expr: |
+        argocd_app_info{sync_status="OutOfSync"} == 1
+      for: 15m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "ArgoCD app {{ $labels.name }} is out of sync"
+        description: "Application {{ $labels.name }} (project: {{ $labels.project }}) has been out of sync for 15+ minutes."
+
+    - alert: ArgoCDAppUnhealthy
+      expr: |
+        argocd_app_info{health_status!="Healthy"} == 1
+      for: 10m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "ArgoCD app {{ $labels.name }} is unhealthy"
+        description: "Application {{ $labels.name }} health status: {{ $labels.health_status }}"
+
+---
+# ============================================================
+# Grafana Dashboard ConfigMap
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitops-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/managed-by: argocd
+data:
+  gitops-overview.json: |
+    {
+      "title": "GitOps Demo — Overview",
+      "uid": "gitops-overview",
+      "tags": ["kubernetes", "gitops", "argocd"],
+      "timezone": "browser",
+      "panels": [
+        {
+          "title": "HTTP Request Rate",
+          "type": "graph",
+          "gridPos": {"x":0,"y":0,"w":12,"h":8},
+          "targets": [{
+            "expr": "sum(rate(http_requests_total{namespace='production'}[5m])) by (method, status)",
+            "legendFormat": "{{method}} {{status}}"
+          }]
+        },
+        {
+          "title": "p99 Latency (ms)",
+          "type": "graph",
+          "gridPos": {"x":12,"y":0,"w":12,"h":8},
+          "targets": [{
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace='production'}[5m])) by (le)) * 1000",
+            "legendFormat": "p99"
+          }]
+        },
+        {
+          "title": "Pod Status",
+          "type": "stat",
+          "gridPos": {"x":0,"y":8,"w":6,"h":4},
+          "targets": [{
+            "expr": "count(kube_pod_status_ready{condition='true', namespace=~'production|staging'})"
+          }]
+        },
+        {
+          "title": "ArgoCD App Health",
+          "type": "stat",
+          "gridPos": {"x":6,"y":8,"w":6,"h":4},
+          "targets": [{
+            "expr": "count(argocd_app_info{health_status='Healthy'})"
+          }]
+        }
+      ]
+    }

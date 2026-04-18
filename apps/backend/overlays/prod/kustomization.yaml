@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: backend-prod
+
+namespace: production
+
+bases:
+  - ../../base
+
+# Production-specific image tag (updated by CI/CD)
+images:
+  - name: ghcr.io/your-org/backend
+    newName: ghcr.io/your-org/backend
+    newTag: "1.5.2"   # <-- CI/CD updates this via sed/kustomize edit
+
+# Scale up for production
+replicas:
+  - name: backend
+    count: 3
+
+# Patch with production-specific config
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: backend
+
+  - path: ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: backend-ingress
+
+# Production-specific labels
+commonLabels:
+  environment: production
+
+# Production configmap values
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - NODE_ENV=production
+      - LOG_LEVEL=warn
+      - DB_HOST=postgres-primary.production.svc.cluster.local
+      - REDIS_URL=redis://redis-cluster.production.svc.cluster.local:6379
+      - CORS_ORIGIN=https://example.com
+
+# Production secrets (sealed by kubeseal — safe to commit)
+resources:
+  - sealed-secret.yaml

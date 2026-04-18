@@ -1,0 +1,116 @@
+---
+# ============================================================
+# NGINX Ingress Controller — ArgoCD Helm Application
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+  source:
+    repoURL: https://kubernetes.github.io/ingress-nginx
+    chart: ingress-nginx
+    targetRevision: "4.10.1"
+    helm:
+      releaseName: ingress-nginx
+      values: |
+        controller:
+          replicaCount: 2
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+            maxReplicas: 5
+            targetCPUUtilizationPercentage: 70
+
+          podAntiAffinity: hard
+
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+
+          service:
+            type: LoadBalancer
+            externalTrafficPolicy: Local
+            annotations:
+              # AWS NLB
+              service.beta.kubernetes.io/aws-load-balancer-type: external
+              service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+              service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+              namespace: monitoring
+
+          config:
+            # Security headers
+            add-headers: ingress-nginx/custom-headers
+            ssl-protocols: "TLSv1.2 TLSv1.3"
+            ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384"
+            ssl-prefer-server-ciphers: "true"
+            # Performance
+            use-gzip: "true"
+            gzip-level: "5"
+            gzip-min-length: "256"
+            upstream-keepalive-connections: "100"
+            upstream-keepalive-time: "60s"
+            # Logging
+            log-format-upstream: >
+              {"time":"$time_iso8601","remote_addr":"$remote_addr",
+              "request_id":"$req_id","request":"$request",
+              "status":$status,"bytes":$body_bytes_sent,
+              "duration":$request_time,"upstream_time":"$upstream_response_time",
+              "host":"$host","x_forwarded_for":"$http_x_forwarded_for",
+              "user_agent":"$http_user_agent"}
+
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Custom response headers ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-headers
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/managed-by: argocd
+data:
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  X-XSS-Protection: "1; mode=block"
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"

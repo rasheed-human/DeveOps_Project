@@ -1,0 +1,383 @@
+---
+# ============================================================
+# ArgoCD — AppProject
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: gitops-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/managed-by: argocd
+spec:
+  description: "GitOps Demo Project — All environments"
+
+  # Allowed source repos
+  sourceRepos:
+    - "https://github.com/your-org/k8s-gitops-project.git"
+    - "https://charts.helm.sh/stable"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://kubernetes.github.io/ingress-nginx"
+    - "https://charts.jetstack.io"
+
+  # Allowed destination clusters and namespaces
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: dev
+    - server: https://kubernetes.default.svc
+      namespace: staging
+    - server: https://kubernetes.default.svc
+      namespace: production
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: ingress-nginx
+    - server: https://kubernetes.default.svc
+      namespace: cert-manager
+
+  # Cluster-scoped resources allowed
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRole
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRoleBinding
+    - group: "networking.k8s.io"
+      kind: IngressClass
+    - group: "apiextensions.k8s.io"
+      kind: CustomResourceDefinition
+
+  # Namespace-scoped resource blacklist (deny direct secret management)
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+
+  # Sync windows — restrict production syncs to business hours
+  syncWindows:
+    - kind: allow
+      schedule: "Mon-Fri 08:00-20:00"
+      duration: 12h
+      applications:
+        - "*"
+      namespaces:
+        - production
+      timeZone: "Asia/Kolkata"
+    - kind: allow
+      schedule: "* * * * *"
+      duration: 24h
+      applications:
+        - "*"
+      namespaces:
+        - dev
+        - staging
+
+  # RBAC inside ArgoCD project
+  roles:
+    - name: developer
+      description: "Can sync dev and staging but not prod"
+      policies:
+        - p, proj:gitops-demo:developer, applications, get, gitops-demo/*, allow
+        - p, proj:gitops-demo:developer, applications, sync, gitops-demo/*-dev, allow
+        - p, proj:gitops-demo:developer, applications, sync, gitops-demo/*-staging, allow
+      groups:
+        - developers
+
+    - name: ops
+      description: "Full access to all environments"
+      policies:
+        - p, proj:gitops-demo:ops, applications, *, gitops-demo/*, allow
+      groups:
+        - platform-team
+
+---
+# ============================================================
+# ArgoCD — Root Application (App of Apps pattern)
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    tier: root
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    targetRevision: main
+    path: gitops/argocd/apps
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+---
+# ============================================================
+# ArgoCD — Infrastructure Application
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    targetRevision: main
+    path: infrastructure
+    kustomize:
+      namePrefix: ""
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: false       # Never auto-prune infra resources
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+---
+# ============================================================
+# ArgoCD — Backend Production Application
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backend-production
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"   # Deploy after infra (wave 1)
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: general
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    targetRevision: main
+    path: apps/backend/overlays/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - PrunePropagationPolicy=foreground
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+
+  # Ignore HPA status changes (managed by Kubernetes, not GitOps)
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas   # HPA manages this
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status
+
+  revisionHistoryLimit: 5
+
+---
+# ============================================================
+# ArgoCD — Backend Dev Application
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backend-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    targetRevision: develop     # Dev tracks the develop branch
+    path: apps/backend/overlays/dev
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# ============================================================
+# ArgoCD — Database Production Application
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: database-production
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"   # Deploy before app (wave 1)
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    targetRevision: main
+    path: apps/database/base
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+
+  syncPolicy:
+    automated:
+      prune: false     # Never auto-prune the database
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+
+---
+# ============================================================
+# ArgoCD — Monitoring Application (Prometheus Stack via Helm)
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: "57.2.0"
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        grafana:
+          enabled: true
+          adminPassword: changeme-use-sealed-secrets
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hosts:
+              - grafana.example.com
+            tls:
+              - secretName: grafana-tls
+                hosts:
+                  - grafana.example.com
+          persistence:
+            enabled: true
+            size: 10Gi
+
+        prometheus:
+          prometheusSpec:
+            retention: 30d
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: standard
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+            additionalScrapeConfigs:
+              - job_name: kubernetes-pods
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+
+        alertmanager:
+          enabled: true
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: standard
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+
+        nodeExporter:
+          enabled: true
+
+        kubeStateMetrics:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
