@@ -16,7 +16,7 @@ spec:
 
   # Allowed source repos
   sourceRepos:
-    - "https://github.com/your-org/k8s-gitops-project.git"
+    - "https://github.com/rasheed-human/DeveOps_Project.git"
     - "https://charts.helm.sh/stable"
     - "https://prometheus-community.github.io/helm-charts"
     - "https://kubernetes.github.io/ingress-nginx"
@@ -56,23 +56,7 @@ spec:
       kind: ResourceQuota
 
   # Sync windows — restrict production syncs to business hours
-  syncWindows:
-    - kind: allow
-      schedule: "Mon-Fri 08:00-20:00"
-      duration: 12h
-      applications:
-        - "*"
-      namespaces:
-        - production
-      timeZone: "Asia/Kolkata"
-    - kind: allow
-      schedule: "* * * * *"
-      duration: 24h
-      applications:
-        - "*"
-      namespaces:
-        - dev
-        - staging
+  syncWindows:[]
 
   # RBAC inside ArgoCD project
   roles:
@@ -110,7 +94,7 @@ spec:
   project: gitops-demo
 
   source:
-    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    repoURL: https://github.com/rasheed-human/DeveOps_Project.git
     targetRevision: main
     path: gitops/argocd/apps
 
@@ -152,7 +136,7 @@ spec:
   project: gitops-demo
 
   source:
-    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    repoURL: https://github.com/rasheed-human/DeveOps_Project.git
     targetRevision: main
     path: infrastructure
     kustomize:
@@ -195,7 +179,7 @@ spec:
   project: gitops-demo
 
   source:
-    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    repoURL: https://github.com/rasheed-human/DeveOps_Project.git
     targetRevision: main
     path: apps/backend/overlays/prod
 
@@ -246,7 +230,7 @@ spec:
   project: gitops-demo
 
   source:
-    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    repoURL: https://github.com/rasheed-human/DeveOps_Project.git
     targetRevision: develop     # Dev tracks the develop branch
     path: apps/backend/overlays/dev
 
@@ -278,7 +262,7 @@ spec:
   project: gitops-demo
 
   source:
-    repoURL: https://github.com/your-org/k8s-gitops-project.git
+    repoURL: https://github.com/rasheed-human/DeveOps_Project.git
     targetRevision: main
     path: apps/database/base
 
