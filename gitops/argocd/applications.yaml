@@ -281,82 +281,82 @@ spec:
 # ============================================================
 # ArgoCD — Monitoring Application (Prometheus Stack via Helm)
 # ============================================================
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: monitoring
-  namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "0"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: gitops-demo
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: monitoring
+#   namespace: argocd
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "0"
+#   finalizers:
+#     - resources-finalizer.argocd.argoproj.io
+# spec:
+#   project: gitops-demo
 
-  source:
-    repoURL: https://prometheus-community.github.io/helm-charts
-    chart: kube-prometheus-stack
-    targetRevision: "57.2.0"
-    helm:
-      releaseName: kube-prometheus-stack
-      values: |
-        grafana:
-          enabled: true
-          adminPassword: changeme-use-sealed-secrets
-          ingress:
-            enabled: true
-            ingressClassName: nginx
-            hosts:
-              - grafana.example.com
-            tls:
-              - secretName: grafana-tls
-                hosts:
-                  - grafana.example.com
-          persistence:
-            enabled: true
-            size: 10Gi
+#   source:
+#     repoURL: https://prometheus-community.github.io/helm-charts
+#     chart: kube-prometheus-stack
+#     targetRevision: "57.2.0"
+#     helm:
+#       releaseName: kube-prometheus-stack
+#       values: |
+#         grafana:
+#           enabled: true
+#           adminPassword: changeme-use-sealed-secrets
+#           ingress:
+#             enabled: true
+#             ingressClassName: nginx
+#             hosts:
+#               - grafana.example.com
+#             tls:
+#               - secretName: grafana-tls
+#                 hosts:
+#                   - grafana.example.com
+#           persistence:
+#             enabled: true
+#             size: 10Gi
 
-        prometheus:
-          prometheusSpec:
-            retention: 30d
-            storageSpec:
-              volumeClaimTemplate:
-                spec:
-                  storageClassName: standard
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 50Gi
-            additionalScrapeConfigs:
-              - job_name: kubernetes-pods
-                kubernetes_sd_configs:
-                  - role: pod
-                relabel_configs:
-                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-                    action: keep
-                    regex: true
+#         prometheus:
+#           prometheusSpec:
+#             retention: 30d
+#             storageSpec:
+#               volumeClaimTemplate:
+#                 spec:
+#                   storageClassName: standard
+#                   accessModes: ["ReadWriteOnce"]
+#                   resources:
+#                     requests:
+#                       storage: 50Gi
+#             additionalScrapeConfigs:
+#               - job_name: kubernetes-pods
+#                 kubernetes_sd_configs:
+#                   - role: pod
+#                 relabel_configs:
+#                   - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+#                     action: keep
+#                     regex: true
 
-        alertmanager:
-          enabled: true
-          alertmanagerSpec:
-            storage:
-              volumeClaimTemplate:
-                spec:
-                  storageClassName: standard
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 10Gi
+#         alertmanager:
+#           enabled: true
+#           alertmanagerSpec:
+#             storage:
+#               volumeClaimTemplate:
+#                 spec:
+#                   storageClassName: standard
+#                   accessModes: ["ReadWriteOnce"]
+#                   resources:
+#                     requests:
+#                       storage: 10Gi
 
-        nodeExporter:
-          enabled: true
+#         nodeExporter:
+#           enabled: true
 
-        kubeStateMetrics:
-          enabled: true
+#         kubeStateMetrics:
+#           enabled: true
 
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: monitoring
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: monitoring
 
   syncPolicy:
     automated:
