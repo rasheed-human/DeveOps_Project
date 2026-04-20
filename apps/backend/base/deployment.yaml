@@ -87,6 +87,8 @@ spec:
             configMapKeyRef:
               name: backend-config
               key: NODE_ENV
+        - name: DEMO_MESSAGE
+          value: "Updated via GitOps 🚀"
         - name: PORT
           value: "8080"
         - name: DB_HOST
@@ -276,5 +278,5 @@ metadata:
 spec:
   minAvailable: 1
   selector:
-    matchLabels:
+    matchenvs:
       app: backend
